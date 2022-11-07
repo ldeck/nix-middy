@@ -90,7 +90,7 @@ NAME=$(echo "$JSON" | jq -r '.token')
 HOMEPAGE=$(echo "$JSON" | jq -r '.homepage')
 DESCRIPTION=$(echo "$JSON" | jq -r '.desc')
 SHA256=$(echo "$JSON" | jq -r '.sha256')
-SOURCEROOT=$(echo "$JSON" | jq -r 'limit(1; .artifacts[] | select(type == "array") | first)')
+SOURCEROOT=$(echo "$JSON" | jq -r 'try (.artifacts[] | .app | first) catch null' | grep -v null)
 URL=$(echo "$JSON" | jq -r '.url')
 TYPE=${URL:(-3)}
 
