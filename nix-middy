@@ -86,12 +86,7 @@ MAJOR_MINOR_VERSION=$(echo "${RAW_VERSION}" | perl -nle 'm/^(\d+\.\d+)?.*$/; pri
 # step 3: extract standard attributes
 # ---------------------------------------------------
 
-MACOSVERSION=$(/usr/bin/sw_vers -productVersion)
-case "$MACOSVERSION" in
-    12.7) MACOSNAME="ventura" ;;
-    12.5) MACOSNAME="big_sur" ;;
-    *) MACOSNAME="monterey";;
-esac
+MACOS_NAME=$(VERSION=$(/usr/bin/sw_vers -productVersion); curl -sfLS "https://support.apple.com/en-us/HT201260" | grep -B1 "<td>$VERSION" | sed 's/<[^>]*>//g' | tr '[:upper:]' '[:lower:]' | tr ' ' '_' | sed 's/macos/arm64/' | grep arm64)
 
 NAME=$(echo "$JSON" | jq -r '.token')
 HOMEPAGE=$(echo "$JSON" | jq -r '.homepage')
@@ -101,7 +96,7 @@ SOURCEROOT=$(echo "$JSON" | jq -r 'try (.artifacts[] | .app | first) catch null'
 URL=$(echo "$JSON" | jq -r '.url')
 TYPE=${URL:(-3)}
 
-ARM64SHA256=$(echo "$JSON" | jq -r ".variations.arm64_$MACOSNAME.sha256" | grep -v null)
+ARM64SHA256=$(echo "$JSON" | jq -r ".variations.${MACOS_NAME}.sha256" | grep -v null)
 if [[ -z "$ARM64SHA256" ]]; then
   ARM64SHA256="${SHA256}"
 fi
@@ -127,6 +122,8 @@ if [[ ! -z "$REVISION" ]] && [[ "$URL" == *"$REVISION"* ]]; then
   echo "Found REVISION${REVISION}NUMBER"
   URL=${URL//${REVISION}/\$\{cfg.revision\}}
 fi
+
+URL=${URL//amd64/\$\{cfg.arch\}}
 
 
 # ---------------------------------------------------
