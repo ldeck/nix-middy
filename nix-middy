@@ -53,34 +53,31 @@ RAW_VERSION=$(echo "$JSON" | jq -r '.version')
 
 IFS=', ' read -r -a versions <<< "${RAW_VERSION}"
 
-VERSION="${versions[0]}"
-REVISION=
-BUILDDATE=
+INTEL_VERSION="${versions[0]}"
+INTEL_REVISION=
+INTEL_BUILDDATE=
 
 if [[ "${#versions[@]}" -eq "3" ]]; then
-  BUILDDATE="${versions[1]}"
-  REVISION="${versions[2]}"
+  INTEL_BUILDDATE="${versions[1]}"
+  INTEL_REVISION="${versions[2]}"
 elif [[ "${#versions[@]}" -eq "2" ]]; then
-  BUILDDATE=""
-  REVISION="${versions[1]}"
+  INTEL_BUILDDATE=""
+  INTEL_REVISION="${versions[1]}"
 fi
 
+AARCH64_VERSION=$INTEL_VERSION
+AARCH64_REVISION=$INTEL_REVISION
+AARCH64_BUILDDATE=$INTEL_BUILDDATE
 
 MAJOR_MINOR_VERSION=$(echo "${RAW_VERSION}" | perl -nle 'm/^(\d+\.\d+)?.*$/; print $1')
-# VERSION=$(echo "${RAW_VERSION}" | perl -nle 'm/^(\d+(\.\d+){0,2}).*$/; print $1')
-
-# REVISION=
-# if (( ${#RAW_VERSION} - ${#VERSION} > 1 )); then
-#   REVISION=$(echo "${RAW_VERSION}" | perl -nle "m/^${VERSION}.(.*)$/; print \$1")
-#   echo "REVISION: $REVISION from $RAW_VERSION"
-# fi
-
+MAJOR_VERSION=$(echo "${RAW_VERSION}" | perl -nle 'm/^(\d+)?.*$/; print $1')
 
 #
 # verify we can reconstruct something like the raw version
 #
-[[ $RAW_VERSION =~ ^${VERSION}(.${BUILDDATE})?(.${REVISION})?$ ]] || fail "Raw version ($RAW_VERSION) does not match (${VERSION}.${BUILDDATE}.${REVISION})"
+[[ $RAW_VERSION =~ ^${INTEL_VERSION}(.${INTEL_BUILDDATE})?(.${INTEL_REVISION})?$ ]] || fail "Raw version ($RAW_VERSION) does not match (${INTEL_VERSION}.${INTEL_BUILDDATE}.${INTEL_REVISION})"
 
+[[ $RAW_VERSION =~ ^${AARCH64_VERSION}(.${AARCH64_BUILDDATE})?(.${AARCH64_REVISION})?$ ]] || fail "Raw version ($RAW_VERSION) does not match (${AARCH64_VERSION}.${AARCH64_BUILDDATE}.${AARCH64_REVISION})"
 
 # ---------------------------------------------------
 # step 3: extract standard attributes
@@ -91,50 +88,86 @@ MACOS_NAME=$(VERSION=$(/usr/bin/sw_vers -productVersion); curl -sfLS "https://su
 NAME=$(echo "$JSON" | jq -r '.token')
 HOMEPAGE=$(echo "$JSON" | jq -r '.homepage')
 DESCRIPTION=$(echo "$JSON" | jq -r '.desc')
-SHA256=$(echo "$JSON" | jq -r '.sha256')
 SOURCEROOT=$(echo "$JSON" | jq -r 'try (.artifacts[] | .app | first) catch null' | grep -v null)
-URL=$(echo "$JSON" | jq -r '.url')
-TYPE=${URL:(-3)}
 
-ARM64SHA256=$(echo "$JSON" | jq -r ".variations.${MACOS_NAME}.sha256" | grep -v null)
-if [[ -z "$ARM64SHA256" ]]; then
-  ARM64SHA256="${SHA256}"
+INTEL_SHA256=$(echo "$JSON" | jq -r '.sha256')
+INTEL_URL=$(echo "$JSON" | jq -r '.url')
+TYPE=${INTEL_URL:(-3)}
+
+# ---------------------------------------------------
+# step 4: extract variation attributes for current os
+# ---------------------------------------------------
+
+AARCH64_SHA256=$(echo "$JSON" | jq -r ".variations.${MACOS_NAME}.sha256" | grep -v null)
+if [[ -z "$AARCH64_SHA256" ]]; then
+  AARCH64_SHA256="${INTEL_SHA256}"
 fi
 
+AARCH64_URL=$(echo "$JSON" | jq -r ".variations.${MACOS_NAME}.url" | grep -v null)
+if [[ -z "$AARCH64_URL" ]]; then
+  AARCH64_URL="${INTEL_URL}"
+fi
 
 # ---------------------------------------------------
-# step 4: change url to nix interpolated version
+# step 5: change url to nix interpolated version
 # ---------------------------------------------------
 
-URL=${URL//${VERSION}/\$\{cfg.version\}}
+# intel url interpolations
+
+INTEL_URL=${INTEL_URL//${INTEL_VERSION}/\$\{cfg.version\}}
 
 if ! [ -z "$MAJOR_MINOR_VERSION" ]; then
-  URL=${URL//${MAJOR_MINOR_VERSION}/\$\{lib.versions.majorMinor cfg.version\}}
+  INTEL_URL=${INTEL_URL//${MAJOR_MINOR_VERSION}/\$\{lib.versions.majorMinor cfg.version\}}
 fi
 
-if [[ ! -z "$BUILDDATE" ]] && [[ "$URL" == *"$BUILDDATE"* ]]; then
-  echo "Found Build${BUILDDATE}Date"
-  URL=${URL//${BUILDDATE}/\$\{cfg.date\}}
+# if ! [ -z "$MAJOR_VERSION" ]; then
+#   INTEL_URL=${INTEL_URL//${MAJOR_VERSION}/\$\{lib.versions.major cfg.version\}}
+# fi
+
+if [[ ! -z "$INTEL_BUILDDATE" ]] && [[ "$INTEL_URL" == *"$INTEL_BUILDDATE"* ]]; then
+  echo "Found Build${INTEL_BUILDDATE}Date"
+  INTEL_URL=${INTEL_URL//${INTEL_BUILDDATE}/\$\{cfg.date\}}
 fi
 
-
-if [[ ! -z "$REVISION" ]] && [[ "$URL" == *"$REVISION"* ]]; then
-  echo "Found REVISION${REVISION}NUMBER"
-  URL=${URL//${REVISION}/\$\{cfg.revision\}}
+if [[ ! -z "$INTEL_REVISION" ]] && [[ "$INTEL_URL" == *"$INTEL_REVISION"* ]]; then
+  echo "Found REVISION${INTEL_REVISION}NUMBER"
+  INTEL_URL=${INTEL_URL//${INTEL_REVISION}/\$\{cfg.revision\}}
 fi
 
-URL=${URL//amd64/\$\{cfg.arch\}}
+#INTEL_URL=${INTEL_URL//amd64/\$\{cfg.arch\}}
+
+# aarch64 url interpolations
+
+AARCH64_URL=${AARCH64_URL//${AARCH64_VERSION}/\$\{cfg.version\}}
+
+if ! [ -z "$MAJOR_MINOR_VERSION" ]; then
+  AARCH64_URL=${AARCH64_URL//${MAJOR_MINOR_VERSION}/\$\{lib.versions.majorMinor cfg.version\}}
+fi
+
+# if ! [ -z "$MAJOR_VERSION" ]; then
+#   AARCH64_URL=${AARCH64_URL//${MAJOR_VERSION}/\$\{lib.versions.major cfg.version\}}
+# fi
+
+if [[ ! -z "$AARCH64_BUILDDATE" ]] && [[ "$AARCH64_URL" == *"$AARCH64_BUILDDATE"* ]]; then
+  echo "Found Build${AARCH64_BUILDDATE}Date"
+  AARCH64_URL=${AARCH64_URL//${AARCH64_BUILDDATE}/\$\{cfg.date\}}
+fi
+
+if [[ ! -z "$AARCH64_REVISION" ]] && [[ "$AARCH64_URL" == *"$AARCH64_REVISION"* ]]; then
+  echo "Found REVISION${AARCH64_REVISION}NUMBER"
+  AARCH64_URL=${AARCH64_URL//${AARCH64_REVISION}/\$\{cfg.revision\}}
+fi
+
+# ---------------------------------------------------
+# step 6: assign variables
+# ---------------------------------------------------
+
+PACKAGE_NAME="$NAME"
+# PACKAGE_NAME=$(echo $NAME | awk '{print toupper(substr($0,0,1))substr($0,2)}')
 
 
 # ---------------------------------------------------
-# step 5: assign variables
-# ---------------------------------------------------
-
-PACKAGE_NAME=$(echo $NAME | awk '{print toupper(substr($0,0,1))substr($0,2)}')
-
-
-# ---------------------------------------------------
-# step 6: define essential template module
+# step 7: define essential template module
 # ---------------------------------------------------
 
 TEMPLATE=$(cat <<EOF
@@ -150,16 +183,20 @@ let
 
   archSpecs = {
     x86_64-darwin = {
-      version = "${VERSION}";
-      revision = "${REVISION}";
+      version = "${INTEL_VERSION}";
+      revision = "${INTEL_REVISION}";
+      date = "${INTEL_BUILDDATE}";
       arch = "amd64";
-      sha256 = "${SHA256}";
+      url = "${INTEL_URL}";
+      sha256 = "${INTEL_SHA256}";
     };
     aarch64-darwin = {
-      version = "${VERSION}";
-      revision = "${REVISION}";
+      version = "${AARCH64_VERSION}";
+      revision = "${AARCH64_REVISION}";
+      date = "${AARCH64_BUILDDATE}";
       arch = "arm64";
-      sha256 = "${ARM64SHA256}";
+      url = "${AARCH64_URL}";
+      sha256 = "${AARCH64_SHA256}";
     };
   };
 
@@ -179,12 +216,16 @@ in {
         description = "The version of the app.";
       };
       date = mkOption {
-        default = "${BUILDDATE}";
+        default = archSpecs.\${stdenv.hostPlatform.system}.date;
         description = "The build date (if applicable).";
       };
       revision = mkOption {
         default = archSpecs.\${stdenv.hostPlatform.system}.revision;
         description = "The build number of the app (if applicable).";
+      };
+      url = mkOption {
+        default = archSpecs.\${stdenv.hostPlatform.system}.url;
+        description = "The url or url template for the archive.";
       };
       sha256 = mkOption {
         default = archSpecs.\${stdenv.hostPlatform.system}.sha256;
@@ -200,7 +241,7 @@ in {
         sourceRoot = cfg.sourceRoot;
         version = cfg.version;
         src = pkgs.fetchurl {
-          url = "${URL}";
+          url = cfg.url;
           sha256 = cfg.sha256;
           name = "\${(toHyphenedLower name)}-\${arch}-\${version}.${TYPE}";
         };
@@ -213,7 +254,7 @@ EOF
 )
 
 # ---------------------------------------------------
-# step 7: write resulting nix module
+# step 8: write resulting nix module
 # ---------------------------------------------------
 
 DEST_DIR=$(dirname "$DEST")
