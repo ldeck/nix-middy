@@ -85,10 +85,10 @@ MAJOR_VERSION=$(echo "${RAW_VERSION}" | perl -nle 'm/^(\d+)?.*$/; print $1')
 
 MACOS_NAME=$(VERSION=$(/usr/bin/sw_vers -productVersion); curl -sfLS "https://support.apple.com/en-us/HT201260" | grep -B1 "<td>$VERSION" | sed 's/<[^>]*>//g' | tr '[:upper:]' '[:lower:]' | tr ' ' '_' | sed 's/macos/arm64/' | grep arm64)
 
-NAME=$(echo "$JSON" | jq -r '.token')
 HOMEPAGE=$(echo "$JSON" | jq -r '.homepage')
 DESCRIPTION=$(echo "$JSON" | jq -r '.desc')
 SOURCEROOT=$(echo "$JSON" | jq -r 'try (.artifacts[] | .app | first) catch null' | grep -v null)
+NAME="${SOURCEROOT%.app}"
 
 INTEL_SHA256=$(echo "$JSON" | jq -r '.sha256')
 INTEL_URL=$(echo "$JSON" | jq -r '.url')
