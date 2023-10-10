@@ -83,7 +83,7 @@ MAJOR_VERSION=$(echo "${RAW_VERSION}" | perl -nle 'm/^(\d+)?.*$/; print $1')
 # step 3: extract standard attributes
 # ---------------------------------------------------
 
-MACOS_NAME=$(VERSION=$(/usr/bin/sw_vers -productVersion); curl -sfLS "https://support.apple.com/en-us/HT201260" | grep -B3 "<td>$VERSION" | sed 's/<[^>]*>//g' | grep -Ev '^[[:blank:]]*$' |  tr '[:upper:]' '[:lower:]' | tr ' ' '_' | sed 's/macos/arm64/' | grep arm64)
+MACOS_NAME=$(VERSION=$(/usr/bin/sw_vers -productVersion | cut -d. -f1); curl -sfLS "https://support.apple.com/en-us/HT201260" | grep -B3 "<td>${VERSION}\." | sed 's/<[^>]*>//g' | grep -Ev '^[[:blank:]]*$' |  tr '[:upper:]' '[:lower:]' | tr ' ' '_' | sed 's/macos/arm64/' | grep arm64)
 
 HOMEPAGE=$(echo "$JSON" | jq -r '.homepage')
 DESCRIPTION=$(echo "$JSON" | jq -r '.desc')
