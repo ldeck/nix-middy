@@ -76,8 +76,10 @@ else
   ALTERNATIVE_TYPE=${ALTERNATIVE_URL:(-3)}
 fi
 
-echo "main url: $MAIN_URL"
-echo "else url: $ALTERNATIVE_URL"
+echo "main url: ${MAIN_URL}"
+echo "main type: ${MAIN_TYPE}"
+echo "else url: ${ALTERNATIVE_URL}"
+echo "else type: ${ALTERNATIVE_TYPE}"
 
 
 # ---------------------------------------------------
@@ -255,6 +257,7 @@ let
       arch = "amd64";
       url = "${INTEL_URL}";
       sha256 = "${INTEL_SHA256}";
+      imagetype = "${INTEL_TYPE}";
     };
     aarch64-darwin = {
       version = "${AARCH64_VERSION}";
@@ -263,6 +266,7 @@ let
       arch = "arm64";
       url = "${AARCH64_URL}";
       sha256 = "${AARCH64_SHA256}";
+      imagetype = "${AARCH64_TYPE}";
     };
   };
 
@@ -297,6 +301,10 @@ in {
         default = archSpecs.\${stdenv.hostPlatform.system}.sha256;
         description = "The sha256 for the app.";
       };
+      imagetype = mkOption {
+        default = archSpecs.\${stdenv.hostPlatform.system}.imagetype;
+        description = "The image type being downloaded.";
+      };
     };
   };
   config = mkIf cfg.enable {
@@ -309,7 +317,7 @@ in {
         src = pkgs.fetchurl {
           url = cfg.url;
           sha256 = cfg.sha256;
-          name = "\${(toHyphenedLower name)}-\${arch}-\${version}.${TYPE}";
+          name = "\${(toHyphenedLower name)}-\${arch}-\${version}.\${imagetype}";
         };
         appcast = "${REQUEST_URL}";
         homepage = "${HOMEPAGE}";
