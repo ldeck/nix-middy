@@ -40,47 +40,8 @@ else
   usage 1
 fi
 
-
 # ---------------------------------------------------
-# step 2: extract app version
-# ---------------------------------------------------
-#
-# nb: brew uses a weird method of combining 'version' and 'buildnumber'
-#     into a 'version', often separated by comma, but sometimes by dot.
-#     Why? No idea!
-#
-RAW_VERSION=$(echo "$JSON" | jq -r '.version')
-
-IFS=', ' read -r -a versions <<< "${RAW_VERSION}"
-
-INTEL_VERSION="${versions[0]}"
-INTEL_REVISION=
-INTEL_BUILDDATE=
-
-if [[ "${#versions[@]}" -eq "3" ]]; then
-  INTEL_BUILDDATE="${versions[1]}"
-  INTEL_REVISION="${versions[2]}"
-elif [[ "${#versions[@]}" -eq "2" ]]; then
-  INTEL_BUILDDATE=""
-  INTEL_REVISION="${versions[1]}"
-fi
-
-AARCH64_VERSION=$INTEL_VERSION
-AARCH64_REVISION=$INTEL_REVISION
-AARCH64_BUILDDATE=$INTEL_BUILDDATE
-
-MAJOR_MINOR_VERSION=$(echo "${RAW_VERSION}" | perl -nle 'm/^(\d+\.\d+)?.*$/; print $1')
-MAJOR_VERSION=$(echo "${RAW_VERSION}" | perl -nle 'm/^(\d+)?.*$/; print $1')
-
-#
-# verify we can reconstruct something like the raw version
-#
-[[ $RAW_VERSION =~ ^${INTEL_VERSION}(.${INTEL_BUILDDATE})?(.${INTEL_REVISION})?$ ]] || fail "Raw version ($RAW_VERSION) does not match (${INTEL_VERSION}.${INTEL_BUILDDATE}.${INTEL_REVISION})"
-
-[[ $RAW_VERSION =~ ^${AARCH64_VERSION}(.${AARCH64_BUILDDATE})?(.${AARCH64_REVISION})?$ ]] || fail "Raw version ($RAW_VERSION) does not match (${AARCH64_VERSION}.${AARCH64_BUILDDATE}.${AARCH64_REVISION})"
-
-# ---------------------------------------------------
-# step 3: extract standard attributes
+# step 2: extract standard attributes
 # ---------------------------------------------------
 
 MACOS_VERSION=$(/usr/bin/sw_vers -productVersion | cut -d. -f1)
@@ -96,76 +57,175 @@ DESCRIPTION=$(echo "$JSON" | jq -r '.desc')
 SOURCEROOT=$(echo "$JSON" | jq -r 'try (.artifacts[] | .app | first) catch null' | grep -v null)
 NAME="${SOURCEROOT%.app}"
 
-INTEL_SHA256=$(echo "$JSON" | jq -r '.sha256')
-INTEL_URL=$(echo "$JSON" | jq -r '.url')
-TYPE=${INTEL_URL:(-3)}
 
-# ---------------------------------------------------
-# step 4: extract variation attributes for current os
-# ---------------------------------------------------
+#
+# step 3: determine which is the primary machine type
+#
+MAIN_URL=$(echo "$JSON" | jq -r '.url')
+MAIN_SHA256=$(echo "$JSON" | jq -r '.sha256')
+MAIN_TYPE=${MAIN_URL:(-3)}
 
-AARCH64_SHA256=$(echo "$JSON" | jq -r ".variations.${MACOS_NAME}.sha256" | grep -v null)
-if [[ -z "$AARCH64_SHA256" ]]; then
-  AARCH64_SHA256="${INTEL_SHA256}"
+ALTERNATIVE_URL=$(echo "$JSON" | jq -r ".variations.${MACOS_NAME}.url" | grep -v null)
+ALTERNATIVE_SHA256=$(echo "$JSON" | jq -r ".variations.${MACOS_NAME}.sha256" | grep -v null)
+
+if [[ -z "${ALTERNATIVE_URL}" ]]; then
+  ALTERNATIVE_URL="${MAIN_URL}"
+  ALTERNATIVE_SHA256="${MAIN_SHA256}"
+  ALTERNATIVE_TYPE="${MAIN_TYPE}"
+else
+  ALTERNATIVE_TYPE=${ALTERNATIVE_URL:(-3)}
 fi
 
-AARCH64_URL=$(echo "$JSON" | jq -r ".variations.${MACOS_NAME}.url" | grep -v null)
-if [[ -z "$AARCH64_URL" ]]; then
-  AARCH64_URL="${INTEL_URL}"
+echo "main url: $MAIN_URL"
+echo "else url: $ALTERNATIVE_URL"
+
+
+# ---------------------------------------------------
+# step 4: extract app and alternative version if any
+# ---------------------------------------------------
+#
+# nb: brew uses a weird method of combining 'version' and 'buildnumber'
+#     into a 'version', often separated by comma, but sometimes by dot.
+#     Why? No idea!
+#
+
+MAIN_RAW_VERSION=$(echo "$JSON" | jq -r '.version')
+IFS=', ' read -r -a versions <<< "${MAIN_RAW_VERSION}"
+
+MAIN_VERSION="${versions[0]}"
+MAIN_REVISION=
+MAIN_BUILDDATE=
+
+if [[ "${#versions[@]}" -eq "3" ]]; then
+  MAIN_BUILDDATE="${versions[1]}"
+  MAIN_REVISION="${versions[2]}"
+elif [[ "${#versions[@]}" -eq "2" ]]; then
+  MAIN_BUILDDATE=""
+  MAIN_REVISION="${versions[1]}"
+fi
+
+ALTERNATIVE_RAW_VERSION=$(echo "$JSON" | jq -r ".variations.${MACOS_NAME}.version" | grep -v null)
+ALTERNATIVE_BUILDDATE=
+ALTERNATIVE_REVISION=
+# echo "Alternate version '${ALTERNATIVE_RAW_VERSION}'."
+if [[ -z "${ALTERNATIVE_RAW_VERSION}" ]]; then
+  ALTERNATIVE_RAW_VERSION="${MAIN_RAW_VERSION}"
+  ALTERNATIVE_VERSION="${MAIN_VERSION}"
+  ALTERNATIVE_BUILDDATE="${MAIN_BUILDDATE}"
+  ALTERNATIVE_REVISION="${MAIN_REVISION}"
+else
+  IFS=', ' read -r -a altversions <<< "${ALTERNATIVE_RAW_VERSION}"
+  ALTERNATIVE_VERSION="${altversions[0]}"
+  if [[ "$#altversions[@]" -eq "3" ]]; then
+    ALTERNATIVE_BUILDDATE="${altversions[1]}"
+    ALTERNATIVE_REVISION="${altversions[2]}"
+  elif [[ "${#altversions[@]}" -eq "2" ]]; then
+    ALTERNATIVE_REVISION="${altversions[1]}"
+  fi
+fi
+
+
+MAIN_MAJOR_MINOR_VERSION=$(echo "${MAIN_VERSION}" | perl -nle 'm/^(\d+\.\d+)?.*$/; print $1')
+MAIN_MAJOR_VERSION=$(echo "${MAIN_VERSION}" | perl -nle 'm/^(\d+)?.*$/; print $1')
+
+ALTERNATIVE_MAJOR_MINOR_VERSION=$(echo "${ALTERNATIVE_VERSION}" | perl -nle 'm/^(\d+\.\d+)?.*$/; print $1')
+ALTERNATIVE_MAJOR_VERSION=$(echo "${ALTERNATIVE_VERSION}" | perl -nle 'm/^(\d+)?.*$/; print $1')
+
+#
+# step 5: assign main/alternative variables to relevant architecture
+#
+
+if [[ "$MAIN_URL" == *"arm64"* ]] || [[ "$MAIN_URL" == *"aarch64"* ]]; then
+  AARCH64_URL="${MAIN_URL}"
+  AARCH64_SHA256="${MAIN_SHA256}"
+  AARCH64_TYPE="${MAIN_TYPE}"
+  AARCH64_VERSION="${MAIN_VERSION}"
+  AARCH64_REVISION="${MAIN_REVISION}"
+  AARCH64_BUILDDATE="${MAIN_BUILDDATE}"
+  AARCH64_MAJOR_MINOR_VERSION="${MAIN_MAJOR_MINOR_VERSION}"
+  AARCH64_MAJOR_VERSION="${MAIN_MAJOR_VERSION}"
+
+  [[ ${MAIN_RAW_VERSION} =~ ^${AARCH64_VERSION}(.${AARCH64_BUILDDATE})?(.${AARCH64_REVISION})?$ ]] || fail "MAIN Raw version (${MAIN_RAW_VERSION}) does not match (${AARCH64_VERSION}.${AARCH64_BUILDDATE}.${AARCH64_REVISION})"
+
+  INTEL_URL="${ALTERNATIVE_URL}"
+  INTEL_SHA256="${ALTERNATIVE_SHA256}"
+  INTEL_TYPE="${ALTERNATIVE_TYPE}"
+  INTEL_VERSION="${ALTERNATIVE_VERSION}"
+  INTEL_REVISION="${ALTERNATIVE_REVISION}"
+  INTEL_BUILDDATE="${ALTERNATIVE_BUILDDATE}"
+  INTEL_MAJOR_MINOR_VERSION="${ALTERNATIVE_MAJOR_MINOR_VERSION}"
+  INTEL_MAJOR_VERSION="${ALTERNATIVE_MAJOR_VERSION}"
+
+  [[ ${ALTERNATIVE_RAW_VERSION} =~ ^${INTEL_VERSION}(.${INTEL_BUILDDATE})?(.${INTEL_REVISION})?$ ]] || fail "ALTERNATE Raw version (${ALTERNATIVE_RAW_VERSION}) does not match (${INTEL_VERSION}.${INTEL_BUILDDATE}.${INTEL_REVISION})"
+else
+  AARCH64_URL="${ALTERNATIVE_URL}"
+  AARCH64_SHA256="${ALTERNATIVE_SHA256}"
+  AARCH64_TYPE="${ALTERNATIVE_TYPE}"
+  AARCH64_VERSION="${ALTERNATIVE_VERSION}"
+  AARCH64_REVISION="${ALTERNATIVE_REVISION}"
+  AARCH64_BUILDDATE="${ALTERNATIVE_BUILDDATE}"
+  AARCH64_MAJOR_MINOR_VERSION="${ALTERNATIVE_MAJOR_MINOR_VERSION}"
+  AARCH64_MAJOR_VERSION="${ALTERNATIVE_MAJOR_VERSION}"
+
+
+  [[ ${ALTERNATIVE_RAW_VERSION} =~ ^${AARCH64_VERSION}(.${AARCH64_BUILDDATE})?(.${AARCH64_REVISION})?$ ]] || fail "ALTERNATE Raw version (${ALTERNATIVE_RAW_VERSION}) does not match (${AARCH64_VERSION}.${AARCH64_BUILDDATE}.${AARCH64_REVISION})"
+
+  INTEL_URL="${MAIN_URL}"
+  INTEL_SHA256="${MAIN_SHA256}"
+  INTEL_TYPE="${MAIN_TYPE}"
+  INTEL_VERSION="${MAIN_VERSION}"
+  INTEL_REVISION="${MAIN_REVISION}"
+  INTEL_BUILDDATE="${MAIN_BUILDDATE}"
+  INTEL_MAJOR_MINOR_VERSION="${MAIN_MAJOR_MINOR_VERSION}"
+  INTEL_MAJOR_VERSION="${MAIN_MAJOR_VERSION}"
+
+  [[ ${MAIN_RAW_VERSION} =~ ^${INTEL_VERSION}(.${INTEL_BUILDDATE})?(.${INTEL_REVISION})?$ ]] || fail "MAIN Raw version (${MAIN_RAW_VERSION}) does not match (${INTEL_VERSION}.${INTEL_BUILDDATE}.${INTEL_REVISION})"
 fi
 
 # ---------------------------------------------------
-# step 5: change url to nix interpolated version
+# step 6: change url to nix interpolated version
 # ---------------------------------------------------
 
 # intel url interpolations
 
 INTEL_URL=${INTEL_URL//${INTEL_VERSION}/\$\{cfg.version\}}
 
-if ! [ -z "$MAJOR_MINOR_VERSION" ]; then
-  INTEL_URL=${INTEL_URL//${MAJOR_MINOR_VERSION}/\$\{lib.versions.majorMinor cfg.version\}}
+if ! [ -z "$INTEL_MAJOR_MINOR_VERSION" ]; then
+  echo "Found intel major minor version: ${INTEL_MAJOR_MINOR_VERSION}"
+  INTEL_URL=${INTEL_URL//${INTEL_MAJOR_MINOR_VERSION}/\$\{lib.versions.majorMinor cfg.version\}}
 fi
 
-# if ! [ -z "$MAJOR_VERSION" ]; then
-#   INTEL_URL=${INTEL_URL//${MAJOR_VERSION}/\$\{lib.versions.major cfg.version\}}
-# fi
-
 if [[ ! -z "$INTEL_BUILDDATE" ]] && [[ "$INTEL_URL" == *"$INTEL_BUILDDATE"* ]]; then
-  echo "Found Build${INTEL_BUILDDATE}Date"
+  echo "Found intel build date: ${INTEL_BUILDDATE}"
   INTEL_URL=${INTEL_URL//${INTEL_BUILDDATE}/\$\{cfg.date\}}
 fi
 
 if [[ ! -z "$INTEL_REVISION" ]] && [[ "$INTEL_URL" == *"$INTEL_REVISION"* ]]; then
-  echo "Found REVISION${INTEL_REVISION}NUMBER"
+  echo "Found intel revision number: ${INTEL_REVISION}"
   INTEL_URL=${INTEL_URL//${INTEL_REVISION}/\$\{cfg.revision\}}
 fi
-
-#INTEL_URL=${INTEL_URL//amd64/\$\{cfg.arch\}}
 
 # aarch64 url interpolations
 
 AARCH64_URL=${AARCH64_URL//${AARCH64_VERSION}/\$\{cfg.version\}}
 
-if ! [ -z "$MAJOR_MINOR_VERSION" ]; then
-  AARCH64_URL=${AARCH64_URL//${MAJOR_MINOR_VERSION}/\$\{lib.versions.majorMinor cfg.version\}}
+if ! [ -z "$AARCH64_MAJOR_MINOR_VERSION" ]; then
+  echo "Found aarch64 major minor version: ${AARCH64_MAJOR_MINOR_VERSION}"
+  AARCH64_URL=${AARCH64_URL//${AARCH64_MAJOR_MINOR_VERSION}/\$\{lib.versions.majorMinor cfg.version\}}
 fi
 
-# if ! [ -z "$MAJOR_VERSION" ]; then
-#   AARCH64_URL=${AARCH64_URL//${MAJOR_VERSION}/\$\{lib.versions.major cfg.version\}}
-# fi
-
 if [[ ! -z "$AARCH64_BUILDDATE" ]] && [[ "$AARCH64_URL" == *"$AARCH64_BUILDDATE"* ]]; then
-  echo "Found Build${AARCH64_BUILDDATE}Date"
+  echo "Found aarch64 build date: ${AARCH64_BUILDDATE}"
   AARCH64_URL=${AARCH64_URL//${AARCH64_BUILDDATE}/\$\{cfg.date\}}
 fi
 
 if [[ ! -z "$AARCH64_REVISION" ]] && [[ "$AARCH64_URL" == *"$AARCH64_REVISION"* ]]; then
-  echo "Found REVISION${AARCH64_REVISION}NUMBER"
+  echo "Found aarch64 revision number: ${AARCH64_REVISION}"
   AARCH64_URL=${AARCH64_URL//${AARCH64_REVISION}/\$\{cfg.revision\}}
 fi
 
 # ---------------------------------------------------
-# step 6: assign variables
+# step 7: assign variables
 # ---------------------------------------------------
 
 PACKAGE_NAME="$NAME"
@@ -173,7 +233,7 @@ PACKAGE_NAME="$NAME"
 
 
 # ---------------------------------------------------
-# step 7: define essential template module
+# step 8: define essential template module
 # ---------------------------------------------------
 
 TEMPLATE=$(cat <<EOF
@@ -260,7 +320,7 @@ EOF
 )
 
 # ---------------------------------------------------
-# step 8: write resulting nix module
+# step 9: write resulting nix module
 # ---------------------------------------------------
 
 DEST_DIR=$(dirname "$DEST")
